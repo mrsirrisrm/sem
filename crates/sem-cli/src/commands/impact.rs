@@ -57,7 +57,7 @@ pub fn impact_command(opts: ImpactOptions) {
 
     match opts.mode {
         ImpactMode::Deps => {
-            let graph =
+            let mut graph =
                 if opts.no_cache || file_paths.len() > LARGE_IMPACT_CACHE_MISS_FILE_THRESHOLD {
                     let entity_name = opts.entity_name.clone();
                     let entity_id = opts.entity_id.clone();
@@ -93,6 +93,7 @@ pub fn impact_command(opts: ImpactOptions) {
                         &mut timings,
                     )
                 };
+            graph.apply_parkable_route_edges(root);
             let entity = find_entity(
                 &graph,
                 opts.entity_name.as_deref(),
@@ -104,7 +105,7 @@ pub fn impact_command(opts: ImpactOptions) {
             timings.mark("cli_output_serialization");
         }
         ImpactMode::Dependents => {
-            let graph = if file_paths.len() > LARGE_IMPACT_CACHE_MISS_FILE_THRESHOLD {
+            let mut graph = if file_paths.len() > LARGE_IMPACT_CACHE_MISS_FILE_THRESHOLD {
                 super::graph::get_or_build_graph_topology_with_topology_save_on_miss_with_timings(
                     root,
                     &file_paths,
@@ -121,6 +122,7 @@ pub fn impact_command(opts: ImpactOptions) {
                     &mut timings,
                 )
             };
+            graph.apply_parkable_route_edges(root);
             let entity = find_entity(
                 &graph,
                 opts.entity_name.as_deref(),
@@ -142,7 +144,8 @@ pub fn impact_command(opts: ImpactOptions) {
                     &mut timings,
                 );
                 match graph_data {
-                    super::graph::GraphWithTestData::Full(graph, all_entities) => {
+                    super::graph::GraphWithTestData::Full(mut graph, all_entities) => {
+                        graph.apply_parkable_route_edges(root);
                         let entity = find_entity(
                             &graph,
                             opts.entity_name.as_deref(),
@@ -161,9 +164,10 @@ pub fn impact_command(opts: ImpactOptions) {
                         }
                     }
                     super::graph::GraphWithTestData::Topology {
-                        graph,
+                        mut graph,
                         test_entity_ids,
                     } => {
+                        graph.apply_parkable_route_edges(root);
                         let entity = find_entity(
                             &graph,
                             opts.entity_name.as_deref(),
@@ -187,13 +191,14 @@ pub fn impact_command(opts: ImpactOptions) {
                     }
                 }
             } else {
-                let (graph, all_entities) = super::graph::get_or_build_graph_with_timings(
+                let (mut graph, all_entities) = super::graph::get_or_build_graph_with_timings(
                     root,
                     &file_paths,
                     &registry,
                     opts.no_cache,
                     &mut timings,
                 );
+                graph.apply_parkable_route_edges(root);
                 let entity = find_entity(
                     &graph,
                     opts.entity_name.as_deref(),
