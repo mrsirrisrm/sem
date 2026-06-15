@@ -36,7 +36,8 @@ pub fn context_command(opts: ContextOptions) {
         &ext_filter,
         opts.no_default_excludes,
     );
-    let (graph, all_entities) = super::graph::get_or_build_graph(root, &file_paths, &registry, opts.no_cache);
+    let (mut graph, all_entities) = super::graph::get_or_build_graph(root, &file_paths, &registry, opts.no_cache);
+    graph.apply_parkable_route_edges(root);
 
     let file_path = opts
         .file_path
