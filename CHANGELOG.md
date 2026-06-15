@@ -6,7 +6,7 @@ All notable changes to sem are documented in this file.
 
 ### Added
 
-- Parkable fork: link GCP Cloud Tasks producers to their JAX-RS handlers. A post-build overlay (`parser::parkable_routes`) matches `TaskOptions...withUrl(<url>)` producer call sites against `@Path` + HTTP-verb handler routes (composing class base path + method path, with `{id}` templates and `"prefix/" + id` concatenation handled), then emits synthetic `Calls` edges so `sem impact` traverses the async hop. Kept out of the upstream extraction pipeline to minimise merge conflicts.
+- Parkable fork: link GCP Cloud Tasks producers to their JAX-RS handlers. A post-build overlay (`parser::parkable_routes`) matches `TaskOptions...withUrl(<url>)` producer call sites against `@Path` + HTTP-verb handler routes (composing class base path + method path, with `{id}` templates and `"prefix/" + id` concatenation handled), then emits synthetic `Calls` edges so the async hop is traversable. Wired into `sem impact`, `sem context`, and the MCP server (`sem_impact`/`sem_context`); in the MCP server the overlay is applied in-memory after the on-disk cache save so the persisted cache stays pure upstream data. `sem log` is git-history-based and has no relationship graph, so it is unaffected. Kept out of the upstream extraction pipeline to minimise merge conflicts.
 - Start tracking project changes in `CHANGELOG.md`.
 - Add a pull request check that asks contributors to include a changelog entry.
 - `sem entities` accepts multiple file or directory path arguments.

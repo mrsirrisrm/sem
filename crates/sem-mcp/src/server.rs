@@ -343,7 +343,8 @@ impl SemServer {
         // Check SQLite cache (full hit, then incremental)
         if let Ok(disk) = cache::DiskCache::open(repo_root) {
             // Full cache hit
-            if let Some((graph, entities)) = disk.load(repo_root, file_paths) {
+            if let Some((mut graph, entities)) = disk.load(repo_root, file_paths) {
+                graph.apply_parkable_route_edges(repo_root);
                 let graph = Arc::new(graph);
                 let entities = Arc::new(entities);
                 let mut guard = self.graph_cache.lock().await;
@@ -362,7 +363,7 @@ impl SemServer {
 
             // Incremental: load clean cached data, rebuild only stale files
             if let Some(partial) = disk.load_partial(repo_root, file_paths) {
-                let (graph, entities, metadata) =
+                let (mut graph, entities, metadata) =
                     EntityGraph::build_incremental_with_metadata_and_import_candidates(
                         repo_root,
                         &partial.stale_files,
@@ -384,6 +385,7 @@ impl SemServer {
                     &metadata.deleted_entity_ids,
                 );
 
+                graph.apply_parkable_route_edges(repo_root);
                 let graph = Arc::new(graph);
                 let entities = Arc::new(entities);
                 let mut guard = self.graph_cache.lock().await;
@@ -402,13 +404,15 @@ impl SemServer {
         }
 
         // Fresh build
-        let (graph, entities) = EntityGraph::build(repo_root, file_paths, &self.registry);
+        let (mut graph, entities) = EntityGraph::build(repo_root, file_paths, &self.registry);
 
-        // Persist to SQLite (best-effort)
+        // Persist to SQLite (best-effort) before overlaying fork-specific edges,
+        // so the on-disk cache stays pure upstream data.
         if let Ok(disk) = cache::DiskCache::open(repo_root) {
             let _ = disk.save(repo_root, file_paths, &graph, &entities);
         }
 
+        graph.apply_parkable_route_edges(repo_root);
         let graph = Arc::new(graph);
         let entities = Arc::new(entities);
 
@@ -458,7 +462,8 @@ impl SemServer {
         }
 
         if let Ok(disk) = cache::DiskCache::open(repo_root) {
-            if let Some(graph) = disk.load_graph_topology(repo_root, file_paths) {
+            if let Some(mut graph) = disk.load_graph_topology(repo_root, file_paths) {
+                graph.apply_parkable_route_edges(repo_root);
                 let graph = Arc::new(graph);
                 let mut guard = self.topology_cache.lock().await;
                 *guard = Some(CachedTopology {
