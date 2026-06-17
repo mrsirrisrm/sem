@@ -14,3 +14,4 @@ pub mod scope_resolve;
 // Parkable fork overlay: JAX-RS + Cloud Tasks async edges. Kept separate to
 // minimise merge conflicts with upstream.
 pub mod parkable_routes;
+pub mod parkable_xref;

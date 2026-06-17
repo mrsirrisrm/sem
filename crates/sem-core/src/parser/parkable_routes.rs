@@ -27,9 +27,23 @@ use super::graph::{EntityGraph, EntityRef, RefType};
 /// A single path segment, after normalising both JAX-RS templates (`{id}`) and
 /// producer-side concatenation gaps (`"/foo/" + id`) to the same `Wild` form.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Seg {
+pub(crate) enum Seg {
     Lit(String),
     Wild,
+}
+
+/// A resolved JAX-RS handler route: the full path (class base + method path) as
+/// segments, plus its HTTP verb and entity identity. Shared between the async
+/// task overlay and the cross-repo `parkable_xref` join.
+#[derive(Debug, Clone)]
+pub(crate) struct HandlerRoute {
+    pub id: String,
+    pub name: String,
+    pub file: String,
+    pub line: usize,
+    pub verb: String,
+    pub segs: Vec<Seg>,
+    pub lit_count: usize,
 }
 
 /// Sentinel char standing in for a dynamic (non-string-literal) run inside a
@@ -55,63 +69,10 @@ impl EntityGraph {
     /// it twice will not double up. `root` is the repo root; entity `file_path`s
     /// are resolved relative to it.
     pub fn apply_parkable_route_edges(&mut self, root: &Path) -> RouteEdgeStats {
-        let path_re = Regex::new(r#"@Path\s*\(\s*(?:value\s*=\s*)?"([^"]*)""#).unwrap();
-        let verb_re = Regex::new(r"@(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b").unwrap();
-
         let mut file_cache: HashMap<String, Option<Vec<String>>> = HashMap::new();
 
-        // --- Pass 1: base `@Path` per container (class/interface) -------------
-        // Keyed by container entity id -> base path segments.
-        let mut base_by_id: HashMap<String, Vec<Seg>> = HashMap::new();
-        for ent in self.entities.values() {
-            if !is_container(&ent.entity_type) {
-                continue;
-            }
-            let Some(header) = entity_header(&mut file_cache, root, ent, &container_keywords()) else {
-                continue;
-            };
-            if let Some(cap) = path_re.captures(&header) {
-                base_by_id.insert(ent.id.clone(), jaxrs_segments(&cap[1]));
-            }
-        }
-
-        // --- Pass 2: handler routes (method + verb) --------------------------
-        struct Handler {
-            id: String,
-            segs: Vec<Seg>,
-            lit_count: usize,
-        }
-        let mut handlers: Vec<Handler> = Vec::new();
-        for ent in self.entities.values() {
-            if ent.entity_type != "method" {
-                continue;
-            }
-            let Some(header) = entity_header(&mut file_cache, root, ent, &[ent.name.clone()]) else {
-                continue;
-            };
-            // A JAX-RS endpoint method carries an HTTP verb annotation.
-            if !verb_re.is_match(&header) {
-                continue;
-            }
-            let mut segs = ent
-                .parent_id
-                .as_ref()
-                .and_then(|pid| base_by_id.get(pid))
-                .cloned()
-                .unwrap_or_default();
-            if let Some(cap) = path_re.captures(&header) {
-                segs.extend(jaxrs_segments(&cap[1]));
-            }
-            if segs.is_empty() {
-                continue;
-            }
-            let lit_count = segs.iter().filter(|s| matches!(s, Seg::Lit(_))).count();
-            handlers.push(Handler {
-                id: ent.id.clone(),
-                segs,
-                lit_count,
-            });
-        }
+        // Passes 1-2: collect JAX-RS handler routes (shared with `parkable_xref`).
+        let handlers = collect_handler_routes(self, root, &mut file_cache);
 
         // --- Pass 3: producers (`.withUrl(...)`) -> best matching handler -----
         let mut new_edges: Vec<(String, String)> = Vec::new();
@@ -177,6 +138,70 @@ impl EntityGraph {
     }
 }
 
+/// Collect every JAX-RS handler route in `graph`: class-level `@Path` base
+/// composed with each verb-annotated method's `@Path`. Shared by the async task
+/// overlay (`apply_parkable_route_edges`) and the cross-repo join
+/// (`parkable_xref::collect_endpoints`).
+pub(crate) fn collect_handler_routes(
+    graph: &EntityGraph,
+    root: &Path,
+    file_cache: &mut HashMap<String, Option<Vec<String>>>,
+) -> Vec<HandlerRoute> {
+    let path_re = Regex::new(r#"@Path\s*\(\s*(?:value\s*=\s*)?"([^"]*)""#).unwrap();
+    let verb_re = Regex::new(r"@(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b").unwrap();
+
+    // Pass 1: base `@Path` per container (class/interface), keyed by entity id.
+    let mut base_by_id: HashMap<String, Vec<Seg>> = HashMap::new();
+    for ent in graph.entities.values() {
+        if !is_container(&ent.entity_type) {
+            continue;
+        }
+        let Some(header) = entity_header(file_cache, root, ent, &container_keywords()) else {
+            continue;
+        };
+        if let Some(cap) = path_re.captures(&header) {
+            base_by_id.insert(ent.id.clone(), jaxrs_segments(&cap[1]));
+        }
+    }
+
+    // Pass 2: verb-annotated methods -> full route.
+    let mut handlers = Vec::new();
+    for ent in graph.entities.values() {
+        if ent.entity_type != "method" {
+            continue;
+        }
+        let Some(header) = entity_header(file_cache, root, ent, &[ent.name.clone()]) else {
+            continue;
+        };
+        let Some(verb_cap) = verb_re.captures(&header) else {
+            continue; // not a JAX-RS endpoint
+        };
+        let mut segs = ent
+            .parent_id
+            .as_ref()
+            .and_then(|pid| base_by_id.get(pid))
+            .cloned()
+            .unwrap_or_default();
+        if let Some(cap) = path_re.captures(&header) {
+            segs.extend(jaxrs_segments(&cap[1]));
+        }
+        if segs.is_empty() {
+            continue;
+        }
+        let lit_count = segs.iter().filter(|s| matches!(s, Seg::Lit(_))).count();
+        handlers.push(HandlerRoute {
+            id: ent.id.clone(),
+            name: ent.name.clone(),
+            file: ent.file_path.clone(),
+            line: ent.start_line,
+            verb: verb_cap[1].to_string(),
+            segs,
+            lit_count,
+        });
+    }
+    handlers
+}
+
 fn is_container(entity_type: &str) -> bool {
     matches!(entity_type, "class" | "interface" | "enum" | "record")
 }
@@ -189,7 +214,7 @@ fn container_keywords() -> Vec<String> {
 }
 
 /// Read the file backing `file_path` (relative to `root`) into lines, cached.
-fn load_lines<'a>(
+pub(crate) fn load_lines<'a>(
     cache: &'a mut HashMap<String, Option<Vec<String>>>,
     root: &Path,
     file_path: &str,
@@ -205,7 +230,7 @@ fn load_lines<'a>(
 }
 
 /// Full source slice for an entity (`start_line..=end_line`, 1-based).
-fn entity_slice(
+pub(crate) fn entity_slice(
     cache: &mut HashMap<String, Option<Vec<String>>>,
     root: &Path,
     ent: &super::graph::EntityInfo,
@@ -223,7 +248,7 @@ fn entity_slice(
 /// not including) the first line declaring the entity (the line containing one
 /// of `markers` as a word). For Java the span already includes leading
 /// annotations, so this isolates them from the body.
-fn entity_header(
+pub(crate) fn entity_header(
     cache: &mut HashMap<String, Option<Vec<String>>>,
     root: &Path,
     ent: &super::graph::EntityInfo,
@@ -262,11 +287,11 @@ fn line_declares(line: &str, marker: &str) -> bool {
 }
 
 /// Split a JAX-RS path template into segments; `{x}` becomes `Wild`.
-fn jaxrs_segments(path: &str) -> Vec<Seg> {
+pub(crate) fn jaxrs_segments(path: &str) -> Vec<Seg> {
     to_segments(path, |s| s.contains('{'))
 }
 
-fn to_segments(path: &str, is_wild: impl Fn(&str) -> bool) -> Vec<Seg> {
+pub(crate) fn to_segments(path: &str, is_wild: impl Fn(&str) -> bool) -> Vec<Seg> {
     path.split('/')
         .filter(|s| !s.is_empty())
         .map(|s| {
@@ -376,7 +401,7 @@ fn producer_segments(arg: &str) -> Option<Vec<Seg>> {
 /// satisfy a handler literal. This prevents two distinct routes whose wildcards
 /// sit in different positions (e.g. `/x/{id}/apply` vs `/x/billing/{id}`) from
 /// cross-matching. Lengths must be equal.
-fn routes_match(handler: &[Seg], producer: &[Seg]) -> bool {
+pub(crate) fn routes_match(handler: &[Seg], producer: &[Seg]) -> bool {
     handler.len() == producer.len()
         && handler.iter().zip(producer).all(|(h, p)| match h {
             Seg::Wild => true,

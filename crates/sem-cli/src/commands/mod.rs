@@ -11,6 +11,7 @@ pub mod setup;
 pub mod stats;
 pub mod update;
 pub mod verify;
+pub mod xref;
 
 use sem_core::parser::plugins::create_default_registry;
 use sem_core::parser::registry::ParserRegistry;

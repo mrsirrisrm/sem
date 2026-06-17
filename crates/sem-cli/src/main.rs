@@ -311,6 +311,27 @@ enum Commands {
     },
     /// Show lifetime diff statistics
     Stats,
+    /// Cross-repo impact across the API and its TS clients (Parkable)
+    Xref {
+        /// Name of the entity to analyze, optionally as "type name"
+        entity: String,
+
+        /// Repo as tag=path (repeatable), e.g. --repo api=/path/to/parkableapi
+        #[arg(long = "repo", value_name = "TAG=PATH", num_args = 1..)]
+        repos: Vec<String>,
+
+        /// File containing the entity (disambiguates if multiple matches)
+        #[arg(long)]
+        file: Option<String>,
+
+        /// How far to walk in-client dependents when showing affected UI
+        #[arg(long)]
+        depth: Option<usize>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Start the MCP server (stdin/stdout transport)
     Mcp,
     /// Replace `git diff` with `sem diff` globally
@@ -359,6 +380,7 @@ fn telemetry_command_name(command: &Option<Commands>) -> Option<&'static str> {
         Some(Commands::Context { .. }) => "context",
         Some(Commands::Verify { .. }) => "verify",
         Some(Commands::Stats) => "stats",
+        Some(Commands::Xref { .. }) => "xref",
         Some(Commands::Mcp) => "mcp",
         Some(Commands::Setup) => "setup",
         Some(Commands::Unsetup) => "unsetup",
@@ -614,6 +636,29 @@ fn main() {
         }
         Some(Commands::Stats) => {
             commands::stats::run();
+        }
+        Some(Commands::Xref {
+            entity,
+            repos,
+            file,
+            depth,
+            json,
+        }) => {
+            let parsed: Vec<(String, String)> = repos
+                .iter()
+                .filter_map(|spec| spec.split_once('=').map(|(t, p)| (t.to_string(), p.to_string())))
+                .collect();
+            if parsed.len() != repos.len() {
+                eprintln!("{} each --repo must be tag=path", "error:".red().bold());
+                std::process::exit(1);
+            }
+            commands::xref::xref_command(commands::xref::XrefOptions {
+                entity,
+                file,
+                repos: parsed,
+                depth,
+                json,
+            });
         }
         Some(Commands::Mcp) => {
             if let Err(e) = sem_mcp::run() {
