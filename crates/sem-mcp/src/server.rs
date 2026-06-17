@@ -25,7 +25,8 @@ use crate::cache;
 use crate::tools::*;
 
 const MCP_INSTRUCTIONS: &str = "sem MCP server for entity-level semantic code intelligence. \
-                                6 tools: sem_entities, sem_diff, sem_blame, sem_impact, sem_log, sem_context.";
+                                7 tools: sem_entities, sem_diff, sem_blame, sem_impact, sem_log, sem_context, \
+                                sem_xref (Parkable cross-repo API<->client impact).";
 
 const ENTITY_LOOKUP_CANDIDATE_LIMIT: usize = 10;
 
@@ -1063,6 +1064,57 @@ impl SemServer {
                 "context": result,
             }))
             .unwrap_or_default(),
+        )]))
+    }
+
+    #[tool(
+        description = "Parkable cross-repo impact across the API (Java/JAX-RS) and its TS clients (web, mobile), joined by request URL + HTTP verb. Pass the entity plus the repos to span as \"tag=absolute_path\". An API endpoint resolves to the client call sites that consume it (+ in-client dependents); a client hook resolves to the API endpoint(s) it calls."
+    )]
+    async fn sem_xref(
+        &self,
+        Parameters(params): Parameters<XrefParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        use sem_core::parser::parkable_xref::{build_report, expand_tilde, XrefRepo};
+
+        // Parse and build each repo (fresh graphs; xref is off the cache path).
+        let mut built: Vec<(String, std::path::PathBuf, EntityGraph)> = Vec::new();
+        for spec in &params.repos {
+            let Some((tag, path)) = spec.split_once('=') else {
+                return Ok(tool_error(format!("repo must be tag=path: '{spec}'")));
+            };
+            let root = expand_tilde(path);
+            if !root.exists() {
+                return Ok(tool_error(format!("repo '{tag}' path not found: {path}")));
+            }
+            let registry = create_default_registry();
+            let files = match Self::find_supported_files(&root, &registry) {
+                Ok(f) => f,
+                Err(err) => return Ok(tool_error(err)),
+            };
+            let (mut graph, _entities) = EntityGraph::build(&root, &files, &registry);
+            graph.apply_parkable_route_edges(&root);
+            built.push((tag.to_string(), root, graph));
+        }
+        if built.is_empty() {
+            return Ok(tool_error("no repos provided".to_string()));
+        }
+
+        let repos: Vec<XrefRepo> = built
+            .iter()
+            .map(|(tag, root, graph)| XrefRepo {
+                tag: tag.clone(),
+                root: root.as_path(),
+                graph,
+            })
+            .collect();
+        let depth = params.depth.unwrap_or(2);
+        let report = build_report(&repos, &params.entity_name, params.file.as_deref(), depth);
+
+        if let Some(err) = &report.error {
+            return Ok(tool_error(err.clone()));
+        }
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&report).unwrap_or_default(),
         )]))
     }
 }

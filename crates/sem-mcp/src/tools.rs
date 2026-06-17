@@ -50,6 +50,21 @@ pub struct ImpactAnalysisParams {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct XrefParams {
+    #[schemars(description = "Name of the entity to analyze, optionally as \"type name\"")]
+    pub entity_name: String,
+    #[schemars(
+        description = "Repos to span, each as \"tag=absolute_path\" (e.g. \"api=/abs/parkableapi\", \"web=/abs/parkable-web-next\"). Provide the API repo plus any client repos."
+    )]
+    pub repos: Vec<String>,
+    #[schemars(description = "File the entity lives in (disambiguates if multiple matches)")]
+    pub file: Option<String>,
+    #[schemars(description = "How far to walk in-client dependents for affected UI. Default 2.")]
+    pub depth: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LogParams {
     #[schemars(description = "Name of the entity to trace history for")]
     pub entity_name: String,
