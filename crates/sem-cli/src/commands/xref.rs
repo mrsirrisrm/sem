@@ -61,7 +61,7 @@ pub fn xref_command(opts: XrefOptions) {
     // --- Build every repo ----------------------------------------------------
     let mut repos: Vec<Repo> = Vec::new();
     for (tag, path) in &opts.repos {
-        let root = PathBuf::from(path);
+        let root = expand_tilde(path);
         if !root.exists() {
             eprintln!("{} repo '{}' path not found: {}", "warning:".yellow(), tag, path);
             continue;
@@ -376,6 +376,21 @@ fn report_client_to_api(repos: &[Repo], client_ri: usize, target_id: &str, json:
         }
     }
     println!();
+}
+
+/// Expand a leading `~` / `~/...` to `$HOME`. Shells don't expand a tilde that
+/// follows `=` (as in `--repo api=~/code/x`), so the program receives it raw.
+fn expand_tilde(path: &str) -> PathBuf {
+    if path == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(path)
 }
 
 #[derive(Clone, Copy)]
