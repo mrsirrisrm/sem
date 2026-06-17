@@ -21,6 +21,8 @@ grammar-core = [
     "lang-typescript", "lang-javascript", "lang-python",
     "lang-go", "lang-rust", "lang-java",
 ]
+# Parkable slim build: just the stack we actually analyze (API + TS clients).
+grammar-parkable = ["lang-java", "lang-typescript", "lang-javascript"]
 grammar-all = [
     "grammar-core",
     "lang-c", "lang-cpp", "lang-ruby", "lang-csharp", "lang-php",

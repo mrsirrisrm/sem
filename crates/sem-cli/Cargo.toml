@@ -15,8 +15,11 @@ name = "sem"
 path = "src/main.rs"
 
 [dependencies]
-sem-core = { path = "../sem-core", version = "0.10.1" }
-sem-mcp = { path = "../sem-mcp", version = "0.10.1" }
+# default-features off so the grammar set is chosen via this crate's
+# `grammar-*` features (forwarded to sem-core and sem-mcp). Enables slim builds
+# like `--no-default-features --features grammar-parkable`.
+sem-core = { path = "../sem-core", version = "0.10.1", default-features = false, features = ["git", "parallel"] }
+sem-mcp = { path = "../sem-mcp", version = "0.10.1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
 colored = "2"
@@ -49,6 +52,11 @@ pkg-url = "{ repo }/releases/download/v{ version }/sem-windows-x86_64.zip"
 pkg-fmt = "zip"
 
 [features]
+default = ["grammar-all"]
+# Full language set (upstream default).
+grammar-all = ["sem-core/grammar-all", "sem-mcp/grammar-all"]
+# Parkable slim build: Java + TypeScript + JavaScript only.
+grammar-parkable = ["sem-core/grammar-parkable", "sem-mcp/grammar-parkable"]
 vendored-openssl = ["openssl-sys/vendored"]
 
 [dev-dependencies]
